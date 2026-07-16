@@ -300,6 +300,62 @@ class _HistorialScreenState extends State<HistorialScreen> {
     }
   }
 
+  String _textoCompartirQuincena({
+    required dynamic item,
+    required List<dynamic> registros,
+    required double totalMetros,
+    required double metaPeriodo,
+    required double porcentaje,
+  }) {
+    final buffer = StringBuffer();
+    buffer.writeln('Historial de quincena');
+    buffer.writeln('Periodo: ${item['periodo']}');
+    buffer.writeln('Cerrada el: ${item['fecha_cierre']}');
+    buffer.writeln('Total metros: ${totalMetros.toStringAsFixed(0)}m');
+    buffer.writeln('Meta fija: ${metaPeriodo.toStringAsFixed(0)}m');
+    buffer.writeln('Porcentaje: ${porcentaje.toStringAsFixed(1)}%');
+    buffer.writeln('');
+    buffer.writeln('Registros:');
+
+    for (final reg in registros) {
+      final totalReg = _totalRegistro(reg);
+      final notas = (reg['notas'] ?? '').toString().trim();
+      buffer.writeln(
+        '${reg['fecha']} - ${totalReg.toStringAsFixed(0)}m '
+        '(M1:${_metrosEnteros(reg['t1_metros'])}m, '
+        'M2:${_metrosEnteros(reg['t2_metros'])}m, '
+        'M3:${_metrosEnteros(reg['t3_metros'])}m, '
+        'M4:${_metrosEnteros(reg['t4_metros'])}m)',
+      );
+      if (notas.isNotEmpty) {
+        buffer.writeln('Notas: $notas');
+      }
+    }
+
+    return buffer.toString();
+  }
+
+  Future<void> _copiarHistorialQuincena({
+    required dynamic item,
+    required List<dynamic> registros,
+    required double totalMetros,
+    required double metaPeriodo,
+    required double porcentaje,
+  }) async {
+    final texto = _textoCompartirQuincena(
+      item: item,
+      registros: registros,
+      totalMetros: totalMetros,
+      metaPeriodo: metaPeriodo,
+      porcentaje: porcentaje,
+    );
+
+    await Clipboard.setData(ClipboardData(text: texto));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Historial copiado al portapapeles')),
+    );
+  }
   Widget _buildTarjetaQuincena({
     required dynamic item,
     required String turnoUsuario,
@@ -390,6 +446,25 @@ class _HistorialScreenState extends State<HistorialScreen> {
                       ),
                     ),
                   ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    onPressed: cargando
+                        ? null
+                        : () => _copiarHistorialQuincena(
+                              item: item,
+                              registros: registros,
+                              totalMetros: totalMetros,
+                              metaPeriodo: metaPeriodo,
+                              porcentaje: porcentaje,
+                            ),
+                    icon: const Icon(Icons.copy, size: 18),
+                    label: const Text('Copiar historial'),
+                  ),
                 ),
               ),
               const Divider(height: 1),
