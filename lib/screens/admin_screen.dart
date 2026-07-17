@@ -17,6 +17,11 @@ class _AdminScreenState extends State<AdminScreen> {
 
   // VARIABLES PARA FILTROS
   String _tipoFiltro = 'Operador';
+  String _periodoFiltro = 'Todos';
+  String _operadorFiltro = 'Todos';
+  String _turnoFiltro = 'Todos';
+  String _cumplimientoFiltro = 'Todos';
+  String _registroFiltro = 'Todos';
   final _busquedaController = TextEditingController();
   final _fechaInicioController = TextEditingController();
   final _fechaFinController = TextEditingController();
@@ -64,9 +69,10 @@ class _AdminScreenState extends State<AdminScreen> {
         _todosLosRegistros = response;
         _registrosFiltrados = response;
         _listaOperadores = opsUnicos.toList();
-        if (_listaOperadores.isNotEmpty) {
-          _operadorSeleccionadoFiltro = _listaOperadores.first;
-        }
+        _operadorSeleccionadoFiltro = _listaOperadores.isNotEmpty
+            ? _listaOperadores.first
+            : null;
+        _operadorFiltro = 'Todos';
         _isLoadingDashboard = false;
       });
     } catch (e) {
@@ -111,46 +117,26 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   void _aplicarFiltro() {
+    final rango = _rangoFechasFiltro();
     setState(() {
-      if (_tipoFiltro == 'Operador') {
-        final query = _operadorSeleccionadoFiltro ?? '';
-        _registrosFiltrados = _todosLosRegistros.where((reg) {
-          final nombre = reg['perfiles']?['nombre_completo'] ?? '';
-          return nombre == query;
-        }).toList();
-      } else if (_tipoFiltro == 'Turno') {
-        _registrosFiltrados = _todosLosRegistros.where((reg) {
-          final turno = reg['perfiles']?['turno_laboral'] ?? '';
-          return _turnosSeleccionadosFiltro.contains(turno);
-        }).toList();
-      } else if (_tipoFiltro == 'Fecha') {
-        final query = _busquedaController.text;
-        if (query.isEmpty) {
-          _registrosFiltrados = _todosLosRegistros;
-          return;
-        }
-        _registrosFiltrados = _todosLosRegistros.where((reg) {
-          return reg['fecha'].toString().contains(query);
-        }).toList();
-      } else if (_tipoFiltro == 'Rango') {
-        final inicio = _fechaInicioController.text;
-        final fin = _fechaFinController.text;
-        if (inicio.isEmpty || fin.isEmpty) return;
-
-        _registrosFiltrados = _todosLosRegistros.where((reg) {
-          final f = reg['fecha'].toString();
-          final turno = reg['perfiles']?['turno_laboral'] ?? '';
-          return f.compareTo(inicio) >= 0 &&
-              f.compareTo(fin) <= 0 &&
-              _turnosSeleccionadosFiltro.contains(turno);
-        }).toList();
-      }
+      _registrosFiltrados = _todosLosRegistros.where((reg) {
+        return _cumplePeriodo(reg, rango) &&
+            _cumpleOperador(reg) &&
+            _cumpleTurno(reg) &&
+            _cumpleCumplimiento(reg) &&
+            _cumpleRegistro(reg);
+      }).toList();
     });
   }
 
   void _limpiarFiltros() {
     setState(() {
       _tipoFiltro = 'Operador';
+      _periodoFiltro = 'Todos';
+      _operadorFiltro = 'Todos';
+      _turnoFiltro = 'Todos';
+      _cumplimientoFiltro = 'Todos';
+      _registroFiltro = 'Todos';
       _busquedaController.clear();
       _fechaInicioController.clear();
       _fechaFinController.clear();
@@ -183,6 +169,127 @@ class _AdminScreenState extends State<AdminScreen> {
     final fecha = reg['fecha']?.toString();
     if (fecha == null || fecha.isEmpty) return null;
     return DateTime.tryParse(fecha);
+  }
+
+  String _formatearFecha(DateTime fecha) {
+    return "${fecha.year}-${fecha.month.toString().padLeft(2, '0')}-${fecha.day.toString().padLeft(2, '0')}";
+  }
+
+  Map<String, String>? _rangoFechasFiltro() {
+    final hoy = DateTime.now();
+    DateTime inicio;
+    DateTime fin;
+
+    switch (_periodoFiltro) {
+      case 'Hoy':
+        inicio = DateTime(hoy.year, hoy.month, hoy.day);
+        fin = inicio;
+        break;
+      case 'Ayer':
+        inicio = DateTime(hoy.year, hoy.month, hoy.day).subtract(
+          const Duration(days: 1),
+        );
+        fin = inicio;
+        break;
+      case 'Esta quincena':
+        if (hoy.day <= 15) {
+          inicio = DateTime(hoy.year, hoy.month, 1);
+          fin = DateTime(hoy.year, hoy.month, 15);
+        } else {
+          inicio = DateTime(hoy.year, hoy.month, 16);
+          fin = DateTime(hoy.year, hoy.month + 1, 0);
+        }
+        break;
+      case 'Quincena anterior':
+        if (hoy.day <= 15) {
+          final mesAnterior = DateTime(hoy.year, hoy.month, 0);
+          inicio = DateTime(mesAnterior.year, mesAnterior.month, 16);
+          fin = mesAnterior;
+        } else {
+          inicio = DateTime(hoy.year, hoy.month, 1);
+          fin = DateTime(hoy.year, hoy.month, 15);
+        }
+        break;
+      case 'Este mes':
+        inicio = DateTime(hoy.year, hoy.month, 1);
+        fin = DateTime(hoy.year, hoy.month + 1, 0);
+        break;
+      case 'Rango personalizado':
+        if (_fechaInicioController.text.isEmpty ||
+            _fechaFinController.text.isEmpty) {
+          return null;
+        }
+        return {
+          'inicio': _fechaInicioController.text,
+          'fin': _fechaFinController.text,
+        };
+      default:
+        return null;
+    }
+
+    return {'inicio': _formatearFecha(inicio), 'fin': _formatearFecha(fin)};
+  }
+
+  bool _cumplePeriodo(dynamic reg, Map<String, String>? rango) {
+    if (rango == null) return true;
+    final fecha = reg['fecha']?.toString() ?? '';
+    return fecha.compareTo(rango['inicio']!) >= 0 &&
+        fecha.compareTo(rango['fin']!) <= 0;
+  }
+
+  bool _cumpleOperador(dynamic reg) {
+    if (_operadorFiltro == 'Todos') return true;
+    final nombre = reg['perfiles']?['nombre_completo'] ?? '';
+    return nombre == _operadorFiltro;
+  }
+
+  bool _cumpleTurno(dynamic reg) {
+    if (_turnoFiltro == 'Todos') return true;
+    final turno = reg['perfiles']?['turno_laboral'] ?? '';
+    return turno == _turnoFiltro;
+  }
+
+  double _porcentajeRegistro(dynamic reg) {
+    final fecha = _fechaRegistro(reg);
+    final turno = reg['perfiles']?['turno_laboral']?.toString() ?? '';
+    if (fecha == null || turno.isEmpty) return 0;
+    final meta = CalculadoraProduccion.calcularMetaDiariaMetros(turno, fecha);
+    return meta <= 0 ? 0 : (_totalRegistro(reg) / meta) * 100;
+  }
+
+  bool _cumpleCumplimiento(dynamic reg) {
+    if (_cumplimientoFiltro == 'Todos') return true;
+    final porcentaje = _porcentajeRegistro(reg);
+    switch (_cumplimientoFiltro) {
+      case 'Bajo 80%':
+        return porcentaje < 80;
+      case '80% a 99%':
+        return porcentaje >= 80 && porcentaje < 100;
+      case '100% o mas':
+        return porcentaje >= 100;
+      default:
+        return true;
+    }
+  }
+
+  bool _cumpleRegistro(dynamic reg) {
+    final notas = (reg['notas'] ?? '').toString().trim();
+    final tieneMaquinaEnCero =
+        (reg['t1_metros'] ?? 0) == 0 ||
+        (reg['t2_metros'] ?? 0) == 0 ||
+        (reg['t3_metros'] ?? 0) == 0 ||
+        (reg['t4_metros'] ?? 0) == 0;
+
+    switch (_registroFiltro) {
+      case 'Con notas':
+        return notas.isNotEmpty;
+      case 'Sin notas':
+        return notas.isEmpty;
+      case 'Maquinas en 0':
+        return tieneMaquinaEnCero;
+      default:
+        return true;
+    }
   }
 
   double _calcularMetaPeriodo(String turno, DateTime inicio, DateTime fin) {
@@ -230,12 +337,13 @@ class _AdminScreenState extends State<AdminScreen> {
       }
     }
 
-    final inicioFiltro = _tipoFiltro == 'Rango'
-        ? DateTime.tryParse(_fechaInicioController.text)
-        : null;
-    final finFiltro = _tipoFiltro == 'Rango'
-        ? DateTime.tryParse(_fechaFinController.text)
-        : null;
+    final rangoFiltro = _rangoFechasFiltro();
+    final inicioFiltro = rangoFiltro == null
+        ? null
+        : DateTime.tryParse(rangoFiltro['inicio']!);
+    final finFiltro = rangoFiltro == null
+        ? null
+        : DateTime.tryParse(rangoFiltro['fin']!);
 
     for (final item in agrupado.values) {
       final inicio = inicioFiltro ?? (item['inicio'] as DateTime?);
@@ -747,63 +855,151 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
-  Widget _buildFiltroDinamico() {
-    if (_tipoFiltro == 'Operador') {
-      return DropdownButtonFormField<String>(
-        value: _operadorSeleccionadoFiltro,
-        decoration: const InputDecoration(border: OutlineInputBorder()),
-        items: _listaOperadores
-            .map((op) => DropdownMenuItem(value: op, child: Text(op)))
-            .toList(),
-        onChanged: (val) => setState(() => _operadorSeleccionadoFiltro = val),
-      );
-    } else if (_tipoFiltro == 'Turno') {
-      return _buildSelectorTurnos();
-    } else if (_tipoFiltro == 'Fecha') {
-      return TextField(
-        controller: _busquedaController,
-        readOnly: true,
-        decoration: const InputDecoration(
-          labelText: 'Seleccionar Fecha',
-          border: OutlineInputBorder(),
-          suffixIcon: Icon(Icons.calendar_month),
+  InputDecoration _decoracionFiltro(String label) {
+    return InputDecoration(
+      labelText: label,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+      isDense: true,
+    );
+  }
+
+  Widget _buildDropdownFiltro({
+    required String label,
+    required String value,
+    required List<String> opciones,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return DropdownButtonFormField<String>(
+      initialValue: value,
+      decoration: _decoracionFiltro(label),
+      items: opciones
+          .map((opcion) => DropdownMenuItem(value: opcion, child: Text(opcion)))
+          .toList(),
+      onChanged: onChanged,
+    );
+  }
+
+  Widget _buildFechaFiltro({
+    required String label,
+    required TextEditingController controller,
+  }) {
+    return TextField(
+      controller: controller,
+      readOnly: true,
+      decoration: _decoracionFiltro(label).copyWith(
+        suffixIcon: const Icon(Icons.calendar_month),
+      ),
+      onTap: () => _seleccionarFecha(context, controller),
+    );
+  }
+
+  Widget _buildPanelFiltros() {
+    final operadores = ['Todos', ..._listaOperadores];
+
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _buildDropdownFiltro(
+                label: 'Rango de fecha',
+                value: _periodoFiltro,
+                opciones: const [
+                  'Todos',
+                  'Hoy',
+                  'Ayer',
+                  'Esta quincena',
+                  'Quincena anterior',
+                  'Este mes',
+                  'Rango personalizado',
+                ],
+                onChanged: (val) {
+                  if (val == null) return;
+                  setState(() {
+                    _periodoFiltro = val;
+                    if (val != 'Rango personalizado') {
+                      _fechaInicioController.clear();
+                      _fechaFinController.clear();
+                    }
+                  });
+                },
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _buildDropdownFiltro(
+                label: 'Operador',
+                value: operadores.contains(_operadorFiltro)
+                    ? _operadorFiltro
+                    : 'Todos',
+                opciones: operadores,
+                onChanged: (val) =>
+                    setState(() => _operadorFiltro = val ?? 'Todos'),
+              ),
+            ),
+          ],
         ),
-        onTap: () => _seleccionarFecha(context, _busquedaController),
-      );
-    } else if (_tipoFiltro == 'Rango') {
-      return Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _fechaInicioController,
-              readOnly: true,
-              decoration: const InputDecoration(
-                labelText: 'Inicio',
-                border: OutlineInputBorder(),
-                suffixIcon: Icon(Icons.calendar_month),
+        if (_periodoFiltro == 'Rango personalizado') ...[
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _buildFechaFiltro(
+                  label: 'Desde',
+                  controller: _fechaInicioController,
+                ),
               ),
-              onTap: () => _seleccionarFecha(context, _fechaInicioController),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: TextField(
-              controller: _fechaFinController,
-              readOnly: true,
-              decoration: const InputDecoration(
-                labelText: 'Fin',
-                border: OutlineInputBorder(),
-                suffixIcon: Icon(Icons.calendar_month),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildFechaFiltro(
+                  label: 'Hasta',
+                  controller: _fechaFinController,
+                ),
               ),
-              onTap: () => _seleccionarFecha(context, _fechaFinController),
-            ),
+            ],
           ),
-          const SizedBox(width: 8),
-          Expanded(child: _buildSelectorTurnos()),
         ],
-      );
-    }
-    return const SizedBox.shrink();
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: _buildDropdownFiltro(
+                label: 'Turno',
+                value: _turnoFiltro,
+                opciones: const ['Todos', 'A', 'B', 'C'],
+                onChanged: (val) =>
+                    setState(() => _turnoFiltro = val ?? 'Todos'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _buildDropdownFiltro(
+                label: 'Cumplimiento',
+                value: _cumplimientoFiltro,
+                opciones: const ['Todos', 'Bajo 80%', '80% a 99%', '100% o mas'],
+                onChanged: (val) =>
+                    setState(() => _cumplimientoFiltro = val ?? 'Todos'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _buildDropdownFiltro(
+                label: 'Registros',
+                value: _registroFiltro,
+                opciones: const [
+                  'Todos',
+                  'Con notas',
+                  'Sin notas',
+                  'Maquinas en 0',
+                ],
+                onChanged: (val) =>
+                    setState(() => _registroFiltro = val ?? 'Todos'),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
   }
 
   @override
@@ -837,44 +1033,25 @@ class _AdminScreenState extends State<AdminScreen> {
                 padding: const EdgeInsets.all(12.0),
                 child: Column(
                   children: [
+                    _buildPanelFiltros(),
+                    const SizedBox(height: 10),
                     Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
                       children: [
-                        DropdownButton<String>(
-                          value: _tipoFiltro,
-                          items: ['Operador', 'Fecha', 'Rango', 'Turno']
-                              .map(
-                                (e) =>
-                                    DropdownMenuItem(value: e, child: Text(e)),
-                              )
-                              .toList(),
-                          onChanged: (val) {
-                            setState(() {
-                              _tipoFiltro = val!;
-                              _busquedaController.clear();
-                              _fechaInicioController.clear();
-                              _fechaFinController.clear();
-                            });
-                          },
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(child: _buildFiltroDinamico()),
-                        const SizedBox(width: 10),
-                        IconButton(
-                          icon: const Icon(
-                            Icons.search,
-                            color: Color(0xFF1E2265),
-                            size: 30,
-                          ),
+                        ElevatedButton.icon(
                           onPressed: _aplicarFiltro,
-                        ),
-                        IconButton(
-                          tooltip: 'Borrar filtros',
-                          icon: const Icon(
-                            Icons.filter_alt_off,
-                            color: Colors.redAccent,
-                            size: 28,
+                          icon: const Icon(Icons.search),
+                          label: const Text('Aplicar filtros'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF1E2265),
+                            foregroundColor: Colors.white,
                           ),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
                           onPressed: _limpiarFiltros,
+                          icon: const Icon(Icons.filter_alt_off),
+                          label: const Text('Limpiar'),
                         ),
                       ],
                     ),

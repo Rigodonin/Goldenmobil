@@ -618,6 +618,60 @@ class _OperadorScreenState extends State<OperadorScreen> {
     };
   }
 
+  double _limiteMetrosPorMaquina() {
+    return _turnoLaboral == 'C' ? 1620 : 1350;
+  }
+
+  bool _hayMaquinasVaciasOCero() {
+    return _telarControllers.any((controller) {
+      final texto = controller.text.trim();
+      return texto.isEmpty || (double.tryParse(texto) ?? 0) == 0;
+    });
+  }
+
+  String? _mensajeLimiteMetros() {
+    final limite = _limiteMetrosPorMaquina();
+    for (var i = 0; i < _telarControllers.length; i++) {
+      final texto = _telarControllers[i].text.trim();
+      if (texto.isEmpty) continue;
+
+      final metros = double.tryParse(texto) ?? 0;
+      if (metros > limite) {
+        return 'La maquina ${i + 1} supera el limite de ${limite.toStringAsFixed(0)}m para el turno $_turnoLaboral.';
+      }
+    }
+
+    return null;
+  }
+
+  Future<bool> _confirmarMaquinasVaciasOCero() async {
+    if (!_hayMaquinasVaciasOCero()) return true;
+
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Confirmar registro'),
+          content: const Text(
+            'Una o mas maquinas estan vacias o en 0m. Seguro que quieres guardar asi?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Guardar asi'),
+            ),
+          ],
+        );
+      },
+    );
+
+    return confirmar == true;
+  }
+
   Future<void> _guardarRegistro() async {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return;
@@ -627,6 +681,15 @@ class _OperadorScreenState extends State<OperadorScreen> {
 
     if (!mounted) return;
     setState(() => _fechaSeleccionada = fechaElegida);
+
+    final mensajeLimite = _mensajeLimiteMetros();
+    if (mensajeLimite != null) {
+      _mostrarSnack(mensajeLimite);
+      return;
+    }
+
+    final continuarConCeros = await _confirmarMaquinasVaciasOCero();
+    if (!continuarConCeros) return;
 
     final fecha = _formatearFecha(fechaElegida);
     final datos = _datosRegistroActual(user.id, fecha);
